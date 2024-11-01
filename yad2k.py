@@ -12,15 +12,13 @@ import os
 from collections import defaultdict
 
 import numpy as np
-from keras import backend as K
+from tensorflow.keras import backend as K
 from keras.layers import (Conv2D, GlobalAveragePooling2D, Input, Lambda,
                           MaxPooling2D)
-from keras.layers.advanced_activations import LeakyReLU
-from keras.layers.merge import concatenate
-from keras.layers.normalization import BatchNormalization
+from keras.layers import LeakyReLU, concatenate, BatchNormalization 
 from keras.models import Model
 from keras.regularizers import l2
-from keras.utils.vis_utils import plot_model as plot
+from tensorflow.keras.utils import plot_model as plot
 
 from yad2k.models.keras_yolo import (space_to_depth_x2,
                                      space_to_depth_x2_output_shape)
@@ -123,7 +121,7 @@ def _main(args):
             # TODO: This assumes channel last dim_ordering.
             weights_shape = (size, size, prev_layer_shape[-1], filters)
             darknet_w_shape = (filters, weights_shape[2], size, size)
-            weights_size = np.product(weights_shape)
+            weights_size = np.prod(weights_shape)
 
             print('conv2d', 'bn'
                   if batch_normalize else '  ', activation, weights_shape)
@@ -176,18 +174,50 @@ def _main(args):
                         activation, section))
 
             # Create Conv2D layer
-            conv_layer = (Conv2D(
-                filters, (size, size),
+            # conv_layer = (Conv2D(
+            #     filters, (size, size),
+            #     strides=(stride, stride),
+            #     kernel_regularizer=l2(weight_decay),
+            #     use_bias=not batch_normalize,
+            #     weights=conv_weights,
+            #     activation=act_fn,
+            #     padding=padding))(prev_layer)
+
+            # Create the Conv2D layer
+            d_conv_layer = Conv2D(
+                filters, 
+                (size, size),
                 strides=(stride, stride),
                 kernel_regularizer=l2(weight_decay),
                 use_bias=not batch_normalize,
-                weights=conv_weights,
                 activation=act_fn,
-                padding=padding))(prev_layer)
+                padding=padding
+            )
+
+            # Set the weights
+            d_conv_layer.build(prev_layer.shape)  # Ensure the layer is built with the correct input shape
+            d_conv_layer.set_weights(conv_weights)
+
+            # Apply the layer to get the output tensor
+            conv_layer = d_conv_layer(prev_layer)
+
 
             if batch_normalize:
-                conv_layer = (BatchNormalization(
-                    weights=bn_weight_list))(conv_layer)
+                # conv_layer = (BatchNormalization(
+                # weights=bn_weight_list))(conv_layer)
+                
+                # Create the BatchNormalization layer
+                bn_layer = BatchNormalization()
+                
+                # Build the layer to match the shape of the input
+                bn_layer.build(conv_layer.shape)
+                
+                # Set the weights for the BatchNormalization layer
+                bn_layer.set_weights(bn_weight_list)
+                
+                # Apply the BatchNormalization layer to the Conv2D layer's output
+                conv_layer = bn_layer(conv_layer)
+
             prev_layer = conv_layer
 
             if activation == 'linear':
